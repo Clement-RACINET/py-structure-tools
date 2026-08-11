@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+.pixi/
+
+# Tests / coverage
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
+# Linters / type checkers
+.ruff_cache/
+.mypy_cache/
+.pyright/
+
+# Generated structure exports
+structure_repo.txt
+structure_repo.json
+structure_repo.yaml
+structure_repo.xml
+structure_repo.html
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,23 @@
+[project]
+name = "py-structure-tools"
+channels = ["conda-forge"]
+platforms = ["win-64", "linux-64", "osx-64"]
+
+[dependencies]
+python = ">=3.11,<3.14"
+pip = ">=24"
+pytest = ">=9.1.1,<10"
+
+[pypi-dependencies]
+py-structure-tools = { path = ".", editable = true }
+pytest = ">=8.0"
+pytest-cov = ">=6.0"
+ruff = ">=0.8"
+basedpyright = ">=1.31.4"
+hatchling = ">=1.25"
+
+[tasks]
+tests = "pytest"
+fmt = "ruff format ."
+typecheck = "basedpyright"
+check = { depends-on = ["fmt", "typecheck", "tests"] }
