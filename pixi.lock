@@ -671,7 +671,7 @@ packages:
 - pypi: ./
   name: py-structure-tools
   version: 0.1.0
-  sha256: 3a5ec32760306118318df7a78cd64cead3095acec5dcaeeb4a2be35e5948695a
+  sha256: 72a8bc88e4ea6b43a9ac3c0b42fa73acb15956a27a8f2c04fb6aebbf394b8e6d
   requires_python: '>=3.11'
   editable: true
 - conda: https://conda.anaconda.org/conda-forge/noarch/pygments-2.20.0-pyhd8ed1ab_0.conda
