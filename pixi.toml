@@ -1,4 +1,4 @@
-[project]
+[workspace]
 name = "py-structure-tools"
 channels = ["conda-forge"]
 platforms = ["win-64", "linux-64", "osx-64"]
