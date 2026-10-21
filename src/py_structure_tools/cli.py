@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
@@ -12,10 +12,18 @@ from py_structure_tools.builder import BuildOptions, build_tree_node
 from py_structure_tools.config import load_config
 from py_structure_tools.defaults import DEFAULT_OUTPUT_BASENAME
 from py_structure_tools.gitignore import GitIgnoreSpec
+from py_structure_tools.local import (
+    LOCAL_MODES,
+    LocalMode,
+    iter_targets,
+    limit_depth,
+    write_if_changed,
+)
 from py_structure_tools.model import SUPPORTED_FORMATS, ExportFormat, TreeNode
 from py_structure_tools.printer import print_tree
 from py_structure_tools.renderers.html import export_html
 from py_structure_tools.renderers.json import export_json
+from py_structure_tools.renderers.md import inject_block, render_embeddable_html
 from py_structure_tools.renderers.txt import export_txt
 from py_structure_tools.renderers.xml import export_xml
 from py_structure_tools.renderers.yaml import export_yaml
@@ -100,6 +108,71 @@ def build_parser() -> argparse.ArgumentParser:
         help="HTML only: directories open by default up to this depth.",
     )
 
+    local_parser = subparsers.add_parser(
+        "local",
+        help="Write a structure file in the root and in each package or folder.",
+    )
+    add_common_options(local_parser)
+    local_parser.add_argument(
+        "--mode",
+        choices=LOCAL_MODES,
+        default="init",
+        help=(
+            "init: root + every directory containing __init__.py (default). "
+            "all: root + every non-empty directory."
+        ),
+    )
+    local_parser.add_argument(
+        "--basename",
+        type=str,
+        default=None,
+        help=f"Output basename. Default: {DEFAULT_OUTPUT_BASENAME}.",
+    )
+    local_parser.add_argument(
+        "--formats",
+        nargs="+",
+        default=None,
+        help="Formats to export: txt json yaml xml html all.",
+    )
+    local_parser.add_argument(
+        "--open-depth",
+        type=int,
+        default=1,
+        help="HTML only: directories open by default up to this depth.",
+    )
+    local_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be created or updated without writing anything.",
+    )
+    local_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Write nothing; exit with code 1 if any file is missing or outdated.",
+    )
+    readme_parser = subparsers.add_parser(
+        "readme",
+        help="Inject the repository tree into a README between markers.",
+    )
+    add_common_options(readme_parser)
+    readme_parser.add_argument(
+        "--file",
+        type=Path,
+        default=Path("README.md"),
+        help="Markdown file to update. Default: README.md (relative to --root).",
+    )
+    readme_parser.add_argument(
+        "--open-depth",
+        type=int,
+        default=1,
+        help="Directories open by default up to this depth.",
+    )
+    readme_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Write nothing; exit with code 1 if the README is outdated.",
+    )
+
     return parser
 
 
@@ -115,7 +188,10 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
         "--max-depth",
         type=int,
         default=None,
-        help="Maximum tree depth. Default: unlimited or config value.",
+        help=(
+            "Maximum tree depth. Default: unlimited or config value. "
+            "With 'local', depth is relative to each generated file."
+        ),
     )
     parser.add_argument(
         "--include-hidden",
@@ -204,6 +280,23 @@ def build_output_paths(
     }
 
 
+def build_exporters(
+    open_depth: int,
+) -> dict[ExportFormat, Callable[[TreeNode, Path], None]]:
+    """Build the exporter registry for all supported formats."""
+    return {
+        "txt": export_txt,
+        "json": export_json,
+        "yaml": export_yaml,
+        "xml": export_xml,
+        "html": lambda node, path: export_html(
+            node,
+            path,
+            open_until_depth=open_depth,
+        ),
+    }
+
+
 def run_tree(namespace: argparse.Namespace) -> int:
     """Run the tree command."""
     options = resolve_runtime_options(namespace)
@@ -245,18 +338,7 @@ def run_export(namespace: argparse.Namespace) -> int:
 
     output_paths = build_output_paths(output_dir, basename)
     open_depth = max(cast(int, namespace.open_depth), 0)
-
-    exporters: dict[ExportFormat, Callable[[TreeNode, Path], None]] = {
-        "txt": export_txt,
-        "json": export_json,
-        "yaml": export_yaml,
-        "xml": export_xml,
-        "html": lambda node, path: export_html(
-            node,
-            path,
-            open_until_depth=open_depth,
-        ),
-    }
+    exporters = build_exporters(open_depth)
 
     for export_format in formats:
         output_path = output_paths[export_format]
@@ -270,6 +352,117 @@ def run_export(namespace: argparse.Namespace) -> int:
     return 0
 
 
+def run_local(namespace: argparse.Namespace) -> int:
+    """Run the local command.
+
+    Build the full tree once, then write one structure file per target directory.
+    """
+    options = resolve_runtime_options(namespace)
+    config = load_config(options.root)
+
+    raw_formats: Sequence[str] = (
+        cast(list[str], namespace.formats)
+        if namespace.formats is not None
+        else config.default_formats
+    )
+
+    try:
+        formats = normalize_formats(raw_formats)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    basename = (
+        cast(str, namespace.basename)
+        if namespace.basename is not None
+        else config.output_basename
+    )
+
+    mode = cast(LocalMode, namespace.mode)
+    check = bool(namespace.check)
+    apply = not (bool(namespace.dry_run) or check)
+    open_depth = max(cast(int, namespace.open_depth), 0)
+
+    # Depth is applied per generated file, so the global tree must be complete.
+    local_depth = options.max_depth
+
+    # Generated files must never appear in the structures they describe.
+    generated_names = tuple(
+        path.name for path in build_output_paths(Path(), basename).values()
+    )
+    full_options = replace(
+        options,
+        exclude_files=(*options.exclude_files, *generated_names),
+        max_depth=None,
+    )
+    root_node = build_tree_from_options(full_options)
+
+    exporters = build_exporters(open_depth)
+    pending = 0
+
+    for relative_dir, node in iter_targets(root_node, mode):
+        subtree = limit_depth(node, local_depth)
+        directory = options.root / relative_dir
+        output_paths = build_output_paths(directory, basename)
+
+        for export_format in formats:
+            destination = output_paths[export_format]
+            status = write_if_changed(
+                exporters[export_format],
+                subtree,
+                destination,
+                apply=apply,
+            )
+
+            if status == "unchanged":
+                continue
+
+            pending += 1
+            label = status if apply else f"would be {status}"
+            print(f"[{label}] {destination.relative_to(options.root).as_posix()}")
+
+    if pending == 0:
+        print("All local structures are up to date.")
+    elif not apply:
+        print(f"{pending} file(s) to create or update.")
+
+    return 1 if (check and pending) else 0
+
+
+def run_readme(namespace: argparse.Namespace) -> int:
+    """Run the readme command: refresh the tree block inside a Markdown file."""
+    options = resolve_runtime_options(namespace)
+
+    readme_path = cast(Path, namespace.file)
+    if not readme_path.is_absolute():
+        readme_path = options.root / readme_path
+
+    if not readme_path.is_file():
+        raise SystemExit(f"File not found: {readme_path}")
+
+    root_node = build_tree_from_options(options)
+    open_depth = max(cast(int, namespace.open_depth), 0)
+    block = render_embeddable_html(root_node, open_until_depth=open_depth)
+
+    current = readme_path.read_text(encoding="utf-8")
+
+    try:
+        updated = inject_block(current, block)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    if updated == current:
+        print(f"{readme_path.name} is up to date.")
+        return 0
+
+    if bool(namespace.check):
+        print(f"{readme_path.name} is outdated.")
+        return 1
+
+    readme_path.write_text(updated, encoding="utf-8")
+    print(f"Structure injected into: {readme_path}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run pystructure."""
     parser = build_parser()
@@ -280,6 +473,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if namespace.command == "export":
         return run_export(namespace)
+
+    if namespace.command == "local":
+        return run_local(namespace)
+
+    if namespace.command == "readme":
+        return run_readme(namespace)
 
     parser.error(f"Unknown command: {namespace.command}")
     return 2
