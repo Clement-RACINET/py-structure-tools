@@ -1,23 +1,47 @@
 [workspace]
 name = "py-structure-tools"
 channels = ["conda-forge"]
-platforms = ["win-64", "linux-64", "osx-64"]
+platforms = ["win-64", "linux-64", "osx-64", "osx-arm64"]
+
+# ---------------------------------------------------------------------------
+# Base environment (default): just run the tool
+# ---------------------------------------------------------------------------
 
 [dependencies]
 python = ">=3.11,<3.14"
-pip = ">=24"
-pytest = ">=9.1.1,<10"
 
 [pypi-dependencies]
 py-structure-tools = { path = ".", editable = true }
-pytest = ">=8.0"
+
+[tasks]
+pystructure = "pystructure"
+structure = "pystructure local"
+readme = "pystructure readme"
+
+# ---------------------------------------------------------------------------
+# Dev feature: formatting, linting, typing, tests
+# ---------------------------------------------------------------------------
+
+[feature.dev.dependencies]
+pytest = ">=9.1.1,<10"
 pytest-cov = ">=6.0"
 ruff = ">=0.8"
 basedpyright = ">=1.31.4"
-hatchling = ">=1.25"
 
-[tasks]
-tests = "pytest"
+[feature.dev.tasks]
 fmt = "ruff format ."
+fmt-check = "ruff format --check ."
+lint = "ruff check ."
 typecheck = "basedpyright"
-check = { depends-on = ["fmt", "typecheck", "tests"] }
+tests = "pytest"
+check = { depends-on = ["fmt", "lint", "typecheck", "tests"] }
+ci = { depends-on = ["fmt-check", "lint", "typecheck", "tests"] }
+readme-check = "pystructure readme --check"
+
+# ---------------------------------------------------------------------------
+# Environments
+# ---------------------------------------------------------------------------
+
+[environments]
+default = { solve-group = "default" }
+dev = { features = ["dev"], solve-group = "default" }
