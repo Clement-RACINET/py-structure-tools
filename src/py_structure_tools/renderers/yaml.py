@@ -25,17 +25,30 @@ def render_yaml_node(
     indent: int = 0,
     as_list_item: bool = False,
 ) -> list[str]:
-    """Render a tree node as YAML lines."""
+    """Render a tree node as YAML lines (metadata keys only when set)."""
     spaces = " " * indent
     prefix = "- " if as_list_item else ""
 
     lines = [f"{spaces}{prefix}name: {yaml_quote(node.name)}"]
     child_indent = indent + (2 if as_list_item else 0)
+    pad = " " * child_indent
 
-    lines.append(f"{' ' * child_indent}type: {yaml_quote(node.type)}")
+    lines.append(f"{pad}type: {yaml_quote(node.type)}")
+
+    if node.size is not None:
+        lines.append(f"{pad}size: {node.size}")
+
+    if node.modified is not None:
+        lines.append(f"{pad}modified: {yaml_quote(node.modified.isoformat())}")
+
+    if node.created is not None:
+        lines.append(f"{pad}created: {yaml_quote(node.created.isoformat())}")
+
+    if node.error is not None:
+        lines.append(f"{pad}error: {yaml_quote(node.error)}")
 
     if node.is_dir:
-        lines.append(f"{' ' * child_indent}children:")
+        lines.append(f"{pad}children:")
 
         if node.children:
             for child in node.children:

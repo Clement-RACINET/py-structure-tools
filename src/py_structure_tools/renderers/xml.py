@@ -9,9 +9,26 @@ from py_structure_tools.model import TreeNode
 
 
 def tree_node_to_xml_element(node: TreeNode) -> ET.Element:
-    """Convert a tree node to an XML element."""
+    """Convert a tree node to an XML element.
+
+    Optional metadata (size, dates, error) become attributes when set.
+    """
     tag = "directory" if node.is_dir else "file"
-    element = ET.Element(tag, {"name": node.name})
+    attributes: dict[str, str] = {"name": node.name}
+
+    if node.size is not None:
+        attributes["size"] = str(node.size)
+
+    if node.modified is not None:
+        attributes["modified"] = node.modified.isoformat()
+
+    if node.created is not None:
+        attributes["created"] = node.created.isoformat()
+
+    if node.error is not None:
+        attributes["error"] = node.error
+
+    element = ET.Element(tag, attributes)
 
     if node.is_dir:
         for child in node.children:

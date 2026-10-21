@@ -1,12 +1,13 @@
 import json
 import xml.etree.ElementTree as ET
+from datetime import UTC, datetime
 from pathlib import Path
 
 from py_structure_tools.model import TreeNode
 from py_structure_tools.renderers.html import build_html_document, count_nodes
 from py_structure_tools.renderers.json import render_json_document
 from py_structure_tools.renderers.txt import render_txt_document
-from py_structure_tools.renderers.xml import export_xml
+from py_structure_tools.renderers.xml import export_xml, tree_node_to_xml_element
 from py_structure_tools.renderers.yaml import render_yaml_document
 
 
@@ -73,3 +74,47 @@ def test_build_html_document() -> None:
     assert "<!doctype html>" in content
     assert "Repository structure: repo" in content
     assert "README.md" in content
+
+
+def make_meta_tree() -> TreeNode:
+    """Build a small tree where every metadata field is set."""
+    moment = datetime(2026, 10, 21, tzinfo=UTC)
+    return TreeNode(
+        name="root",
+        type="directory",
+        children=(
+            TreeNode(
+                name="a.py",
+                type="file",
+                size=2048,
+                modified=moment,
+                created=moment,
+                error="Permission denied",
+            ),
+        ),
+    )
+
+
+def test_txt_renders_metadata_and_summary() -> None:
+    document = render_txt_document(make_meta_tree(), show_summary=True)
+
+    assert "a.py (2.0 KB, modified 2026-10-21, created 2026-10-21)" in document
+    assert "[ERROR: Permission denied]" in document
+    assert "Total size: 2.0 KB" in document
+
+
+def test_yaml_renders_metadata_keys() -> None:
+    document = render_yaml_document(make_meta_tree())
+
+    assert "size: 2048" in document
+    assert 'modified: "2026-10-21T00:00:00+00:00"' in document
+    assert 'error: "Permission denied"' in document
+
+
+def test_xml_renders_metadata_attributes() -> None:
+    element = tree_node_to_xml_element(make_meta_tree())
+    child = element[0]
+
+    assert child.attrib["size"] == "2048"
+    assert child.attrib["error"] == "Permission denied"
+    assert child.attrib["modified"].startswith("2026-10-21")

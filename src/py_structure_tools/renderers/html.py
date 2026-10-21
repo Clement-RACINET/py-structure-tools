@@ -6,6 +6,7 @@ from html import escape
 from pathlib import Path
 
 from py_structure_tools.model import TreeNode
+from py_structure_tools.stats import format_node_meta
 
 
 def count_nodes(node: TreeNode) -> tuple[int, int]:
@@ -28,9 +29,12 @@ def render_html_tree(
 ) -> str:
     """Render a tree node as nested HTML lists."""
     safe_name = escape(node.name)
+    meta = format_node_meta(node)
+    # <em> (not <span>) so the ".file span::before" icon rule does not match it.
+    info_html = f'<em class="info">{escape(meta)}</em>' if meta else ""
 
     if node.is_file:
-        return f'<li class="file"><span>{safe_name}</span></li>'
+        return f'<li class="file"><span>{safe_name}{info_html}</span></li>'
 
     children_html = (
         "\n".join(
@@ -51,7 +55,7 @@ def render_html_tree(
 <li class="directory">
   <details{open_attr}>
     <summary>
-      <span class="name">{safe_name}</span>
+      <span class="name">{safe_name}</span>{info_html}
       <span class="count">{len(node.children)}</span>
     </summary>
     <ul>
@@ -218,6 +222,14 @@ def build_html_document(root_node: TreeNode, open_until_depth: int = 1) -> str:
       color: var(--muted);
       font-size: 11px;
     }}
+
+    .info {{
+      margin-left: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-style: normal;
+    }}
+
   </style>
 </head>
 <body>

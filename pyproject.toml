@@ -1,13 +1,13 @@
 [project]
 name = "py-structure-tools"
-version = "0.1.0"
-description = "Generate, print and export your project's directory tree (TXT, JSON, YAML, XML, HTML) with zero dependencies."
+version = "2026.10.21"
+description = "Generate, print and export your project's directory tree (TXT, JSON, YAML, XML, HTML) with sizes, dates and summary, with zero dependencies."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
     { name = "Clement RACINET" },
 ]
-license = "MIT"
+license = "X11"
 keywords = [
     "repository",
     "tree",
@@ -22,6 +22,8 @@ keywords = [
     "html",
     "llm",
     "cli",
+    "file-size",
+    "summary",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -90,6 +92,7 @@ ignore = [
 "tests/**/*.py" = [
     "D100",
     "D103",
+    "PLR0913",
 ]
 
 [tool.ruff.format]

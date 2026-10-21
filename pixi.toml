@@ -16,7 +16,10 @@ py-structure-tools = { path = ".", editable = true }
 [tasks]
 pystructure = "pystructure"
 structure = "pystructure local"
+structure-size = "pystructure tree --size --summary"
+structure-dates = "pystructure tree --size --dates --summary"
 readme = "pystructure readme"
+
 
 # ---------------------------------------------------------------------------
 # Dev feature: formatting, linting, typing, tests

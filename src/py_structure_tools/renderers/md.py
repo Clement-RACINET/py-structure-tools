@@ -5,6 +5,7 @@ from __future__ import annotations
 from html import escape
 
 from py_structure_tools.model import TreeNode
+from py_structure_tools.stats import format_node_meta
 
 START_MARKER = "<!-- pystructure:start -->"
 END_MARKER = "<!-- pystructure:end -->"
@@ -13,19 +14,20 @@ END_MARKER = "<!-- pystructure:end -->"
 def _render_node(node: TreeNode, depth: int, open_depth: int) -> list[str]:
     """Render one node as <li> lines, without any blank line."""
     name = escape(node.name)
+    meta = escape(format_node_meta(node))
 
     if node.is_file:
-        return [f"<li>📄 {name}</li>"]
+        return [f"<li>📄 {name}{meta}</li>"]
 
     if not node.children:
-        return [f"<li>📁 {name}</li>"]
+        return [f"<li>📁 {name}{meta}</li>"]
 
     open_attr = " open" if depth <= open_depth else ""
     icon = "📂" if open_attr else "📁"
     lines = [
         "<li>",
         f"<details{open_attr}>",
-        f"<summary>{icon} <b>{name}</b> <sub>{len(node.children)}</sub></summary>",
+        f"<summary>{icon} <b>{name}</b>{meta} <sub>{len(node.children)}</sub></summary>",  # noqa: E501
         "<ul>",
     ]
 

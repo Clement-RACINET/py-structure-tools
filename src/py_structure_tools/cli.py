@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
+from py_structure_tools import __version__
 from py_structure_tools.builder import BuildOptions, build_tree_node
 from py_structure_tools.config import load_config
 from py_structure_tools.defaults import DEFAULT_OUTPUT_BASENAME
@@ -22,7 +23,7 @@ from py_structure_tools.local import (
 from py_structure_tools.model import SUPPORTED_FORMATS, ExportFormat, TreeNode
 from py_structure_tools.printer import print_tree
 from py_structure_tools.renderers.html import export_html
-from py_structure_tools.renderers.json import export_json
+from py_structure_tools.renderers.json import export_json, load_json_tree
 from py_structure_tools.renderers.md import inject_block, render_embeddable_html
 from py_structure_tools.renderers.txt import export_txt
 from py_structure_tools.renderers.xml import export_xml
@@ -39,6 +40,9 @@ class RuntimeOptions:
     include_hidden: bool
     use_gitignore: bool
     max_depth: int | None
+    show_size: bool
+    show_dates: bool
+    show_summary: bool
 
 
 def normalize_formats(raw_formats: Sequence[str]) -> tuple[ExportFormat, ...]:
@@ -75,14 +79,22 @@ def build_parser() -> argparse.ArgumentParser:
         prog="pystructure",
         description="Print and export repository structures.",
     )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     tree_parser = subparsers.add_parser("tree", help="Print repository tree.")
     add_common_options(tree_parser)
+    add_from_json_option(tree_parser)
 
     export_parser = subparsers.add_parser("export", help="Export repository tree.")
     add_common_options(export_parser)
+    add_from_json_option(export_parser)
+    add_quiet_option(export_parser)
     export_parser.add_argument(
         "--output-dir",
         type=Path,
@@ -113,6 +125,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write a structure file in the root and in each package or folder.",
     )
     add_common_options(local_parser)
+    add_quiet_option(local_parser)
     local_parser.add_argument(
         "--mode",
         choices=LOCAL_MODES,
@@ -150,11 +163,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write nothing; exit with code 1 if any file is missing or outdated.",
     )
+
     readme_parser = subparsers.add_parser(
         "readme",
         help="Inject the repository tree into a README between markers.",
     )
     add_common_options(readme_parser)
+    add_quiet_option(readme_parser)
     readme_parser.add_argument(
         "--file",
         type=Path,
@@ -215,6 +230,40 @@ def add_common_options(parser: argparse.ArgumentParser) -> None:
         default=[],
         help="File glob pattern to exclude. Can be passed multiple times.",
     )
+    parser.add_argument(
+        "--size",
+        action="store_true",
+        help="Collect and display file sizes.",
+    )
+    parser.add_argument(
+        "--dates",
+        action="store_true",
+        help="Collect and display modification/creation dates (UTC).",
+    )
+    parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="Append a summary (counts, total size, extensions) to TXT output.",
+    )
+
+
+def add_quiet_option(parser: argparse.ArgumentParser) -> None:
+    """Add the --quiet flag to a parser."""
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress informational messages (errors and exit codes remain).",
+    )
+
+
+def add_from_json_option(parser: argparse.ArgumentParser) -> None:
+    """Add the --from-json option to a parser."""
+    parser.add_argument(
+        "--from-json",
+        type=Path,
+        default=None,
+        help="Load the tree from a JSON export instead of scanning the disk.",
+    )
 
 
 def resolve_runtime_options(namespace: argparse.Namespace) -> RuntimeOptions:
@@ -245,6 +294,9 @@ def resolve_runtime_options(namespace: argparse.Namespace) -> RuntimeOptions:
         include_hidden=bool(namespace.include_hidden) or config.include_hidden,
         use_gitignore=not bool(namespace.no_gitignore) and config.use_gitignore,
         max_depth=max_depth,
+        show_size=bool(namespace.size) or config.show_size,
+        show_dates=bool(namespace.dates) or config.show_dates,
+        show_summary=bool(namespace.summary) or config.show_summary,
     )
 
 
@@ -261,9 +313,24 @@ def build_tree_from_options(options: RuntimeOptions) -> TreeNode:
         exclude_files=options.exclude_files,
         include_hidden=options.include_hidden,
         max_depth=options.max_depth,
+        collect_size=options.show_size,
+        collect_dates=options.show_dates,
     )
 
     return build_tree_node(options.root, build_options)
+
+
+def load_tree(namespace: argparse.Namespace, options: RuntimeOptions) -> TreeNode:
+    """Load the tree from a JSON export if requested, otherwise scan the disk."""
+    from_json = cast(Path | None, namespace.from_json)
+
+    if from_json is None:
+        return build_tree_from_options(options)
+
+    try:
+        return load_json_tree(from_json)
+    except (OSError, ValueError, TypeError) as exc:
+        raise SystemExit(f"Cannot load tree from {from_json}: {exc}") from exc
 
 
 def build_output_paths(
@@ -282,10 +349,12 @@ def build_output_paths(
 
 def build_exporters(
     open_depth: int,
+    *,
+    show_summary: bool = False,
 ) -> dict[ExportFormat, Callable[[TreeNode, Path], None]]:
     """Build the exporter registry for all supported formats."""
     return {
-        "txt": export_txt,
+        "txt": lambda node, path: export_txt(node, path, show_summary=show_summary),
         "json": export_json,
         "yaml": export_yaml,
         "xml": export_xml,
@@ -300,9 +369,9 @@ def build_exporters(
 def run_tree(namespace: argparse.Namespace) -> int:
     """Run the tree command."""
     options = resolve_runtime_options(namespace)
-    root_node = build_tree_from_options(options)
+    root_node = load_tree(namespace, options)
 
-    print_tree(root_node)
+    print_tree(root_node, show_summary=options.show_summary)
     return 0
 
 
@@ -310,7 +379,8 @@ def run_export(namespace: argparse.Namespace) -> int:
     """Run the export command."""
     options = resolve_runtime_options(namespace)
     config = load_config(options.root)
-    root_node = build_tree_from_options(options)
+    root_node = load_tree(namespace, options)
+    quiet = bool(namespace.quiet)
 
     raw_formats: Sequence[str] = (
         cast(list[str], namespace.formats)
@@ -338,7 +408,7 @@ def run_export(namespace: argparse.Namespace) -> int:
 
     output_paths = build_output_paths(output_dir, basename)
     open_depth = max(cast(int, namespace.open_depth), 0)
-    exporters = build_exporters(open_depth)
+    exporters = build_exporters(open_depth, show_summary=options.show_summary)
 
     for export_format in formats:
         output_path = output_paths[export_format]
@@ -347,7 +417,9 @@ def run_export(namespace: argparse.Namespace) -> int:
             output_path.unlink()
 
         exporters[export_format](root_node, output_path)
-        print(f"{export_format.upper()} structure exported to: {output_path}")
+
+        if not quiet:
+            print(f"{export_format.upper()} structure exported to: {output_path}")
 
     return 0
 
@@ -359,6 +431,7 @@ def run_local(namespace: argparse.Namespace) -> int:
     """
     options = resolve_runtime_options(namespace)
     config = load_config(options.root)
+    quiet = bool(namespace.quiet)
 
     raw_formats: Sequence[str] = (
         cast(list[str], namespace.formats)
@@ -396,7 +469,7 @@ def run_local(namespace: argparse.Namespace) -> int:
     )
     root_node = build_tree_from_options(full_options)
 
-    exporters = build_exporters(open_depth)
+    exporters = build_exporters(open_depth, show_summary=options.show_summary)
     pending = 0
 
     for relative_dir, node in iter_targets(root_node, mode):
@@ -417,13 +490,16 @@ def run_local(namespace: argparse.Namespace) -> int:
                 continue
 
             pending += 1
-            label = status if apply else f"would be {status}"
-            print(f"[{label}] {destination.relative_to(options.root).as_posix()}")
 
-    if pending == 0:
-        print("All local structures are up to date.")
-    elif not apply:
-        print(f"{pending} file(s) to create or update.")
+            if not quiet:
+                label = status if apply else f"would be {status}"
+                print(f"[{label}] {destination.relative_to(options.root).as_posix()}")
+
+    if not quiet:
+        if pending == 0:
+            print("All local structures are up to date.")
+        elif not apply:
+            print(f"{pending} file(s) to create or update.")
 
     return 1 if (check and pending) else 0
 
@@ -431,6 +507,7 @@ def run_local(namespace: argparse.Namespace) -> int:
 def run_readme(namespace: argparse.Namespace) -> int:
     """Run the readme command: refresh the tree block inside a Markdown file."""
     options = resolve_runtime_options(namespace)
+    quiet = bool(namespace.quiet)
 
     readme_path = cast(Path, namespace.file)
     if not readme_path.is_absolute():
@@ -451,15 +528,19 @@ def run_readme(namespace: argparse.Namespace) -> int:
         raise SystemExit(str(exc)) from exc
 
     if updated == current:
-        print(f"{readme_path.name} is up to date.")
+        if not quiet:
+            print(f"{readme_path.name} is up to date.")
         return 0
 
     if bool(namespace.check):
-        print(f"{readme_path.name} is outdated.")
+        if not quiet:
+            print(f"{readme_path.name} is outdated.")
         return 1
 
     readme_path.write_text(updated, encoding="utf-8")
-    print(f"Structure injected into: {readme_path}")
+
+    if not quiet:
+        print(f"Structure injected into: {readme_path}")
     return 0
 
 

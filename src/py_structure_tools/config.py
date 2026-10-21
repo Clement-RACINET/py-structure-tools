@@ -31,6 +31,9 @@ class StructureConfig:
     max_depth: int | None = None
     default_formats: tuple[ExportFormat, ...] = DEFAULT_FORMATS
     output_basename: str = DEFAULT_OUTPUT_BASENAME
+    show_size: bool = False
+    show_dates: bool = False
+    show_summary: bool = False
 
 
 def _get_table(data: dict[str, TomlValue], key: str) -> dict[str, TomlValue] | None:
@@ -178,4 +181,7 @@ def load_config(root: Path) -> StructureConfig:
             "output_basename",
             DEFAULT_OUTPUT_BASENAME,
         ),
+        show_size=_get_bool(config_data, "show_size", False),
+        show_dates=_get_bool(config_data, "show_dates", False),
+        show_summary=_get_bool(config_data, "show_summary", False),
     )
